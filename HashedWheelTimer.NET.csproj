@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>ricefan123.Timer.HashedWheelTimer</PackageId>
+    <Version>0.0.1-alpha</Version>
+    <Authors>Royce Fan</Authors>
+  </PropertyGroup>
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netcoreapp2.0</TargetFrameworks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="runtimes/linux-x64/native/libmillisleep.so">
+      <PackagePath>runtimes/linux-x64/native/libmillisleep.so</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="nativelibraryloader" Version="1.0.8" />
+    <PackageReference Include="nlog" Version="4.5.3" />
+  </ItemGroup>
+
+</Project>
