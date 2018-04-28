@@ -25,16 +25,22 @@ namespace ricefan123.Timer
         {
             TicksInterval = interval;
             DefaultTimeout = timeout;
+            workerThread = null;
+            workerWorkingFlag = new CountdownEvent(1);
             SetSleep(policy);
+            InitializeSlots();
         }
 
         #endregion
 
         #region Public Methods
 
-        public void ScheduleTimeout(Action callback, TimeSpan timeout)
+        public TimedCallback ScheduleTimeout(Action action, TimeSpan timeout)
         {
+            var callback = new TimedCallback(action);
             ScheduleTimeoutImpl(callback, timeout);
+
+            return callback;
         }
 
 
@@ -42,21 +48,47 @@ namespace ricefan123.Timer
 
         #region Private Methods
 
-        private void ScheduleTimeoutImpl(Action callback, TimeSpan timeout)
+        private void ScheduleTimeoutImpl(TimedCallback callback, TimeSpan timeout)
         {
             Interlocked.Increment(ref timeoutsCount);
-            Start();
+            StartWorking();
         }
 
-        private void Start()
+        private void StartWorking()
         {
+            switch (workerState)
+            {
+            case WORKER_INIT:
+                if (Interlocked.CompareExchange(ref workerState, WORKER_STARTED, WORKER_INIT) == WORKER_INIT)
+                    workerThread.Start();
+                break;
+            case WORKER_STARTED:
+                break;
+            case WORKER_KILLED:
+                throw new InvalidOperationException("Cannot start a killed thread.");
+            default:
+                throw new InvalidOperationException("Unknown worker state.");
+            }
 
+            workerWorkingFlag.Wait();
         }
 
         private void DefaultInitialize()
         {
             DefaultTimeout = TimeSpan.FromSeconds(10);
             TicksInterval = TimeSpan.FromMilliseconds(10);
+            workerThread = null;
+            workerWorkingFlag = new CountdownEvent(1);
+            InitializeSlots();
+        }
+
+        private void InitializeSlots()
+        {
+            slots = new HashedWheelSlot[WHEEL_BUCKETS, WHEEL_SIZE];
+
+            for (int i = 0; i != WHEEL_BUCKETS; ++i)
+                for (int j = 0; j != WHEEL_SIZE; ++j)
+                    slots[i, j] = new HashedWheelSlot();
         }
 
         private void SetSleep(SleepPolicy policy)
@@ -73,10 +105,16 @@ namespace ricefan123.Timer
             }
         }
 
+        private void WorkLoop()
+        {
+            workerWorkingFlag.Signal();
+        }
+
         #endregion
 
         public int TimeoutsCount { get { return timeoutsCount; } }
 
+        CountdownEvent workerWorkingFlag;
         public int timeoutsCount = 0;
 
         private static readonly uint WHEEL_BUCKETS = 4;
@@ -85,8 +123,15 @@ namespace ricefan123.Timer
 
         private static readonly uint WHEEL_MASK = WHEEL_SIZE - 1;
 
+        private Thread workerThread;
 
-        private LinkedList<Action>[,] buckets = new LinkedList<Action>[WHEEL_BUCKETS, WHEEL_SIZE];
+        private volatile int workerState;
+        
+        private const int WORKER_INIT = 0;
+        private const int WORKER_STARTED = 1;
+        private const int WORKER_KILLED = 2;
+
+        private HashedWheelSlot[,] slots;
         private LinkedList<Action> timeouts = new LinkedList<Action>();
 
         private SleepMethods.SleepFunc Sleep { get; set; }
@@ -94,8 +139,5 @@ namespace ricefan123.Timer
         private TimeSpan DefaultTimeout { get; set; }
 
         private TimeSpan TicksInterval { get; set; }
-
-        public LinkedList<Action>[,] Buckets { get => buckets; set => buckets = value; }
-        public LinkedList<Action>[,] Buckets1 { get => buckets; set => buckets = value; }
     }
 }

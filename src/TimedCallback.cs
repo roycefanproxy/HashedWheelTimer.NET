@@ -1,6 +1,5 @@
 using System;
 using System.Threading;
-using System.Threading.Tasks;
 using ricefan123.Timer.Util;
 using NLog;
 
@@ -9,31 +8,39 @@ namespace ricefan123.Timer
     public class TimedCallback
     {
         static Logger logger = LogManager.GetCurrentClassLogger();
-        public static readonly int STATE_INIT = 0;
-        public static readonly int STATE_WORKING = 1;
-        public static readonly int STATE_EXPIRED = 2;
-        public static readonly int STATE_CANCELED = 3;
 
-        public TimedCallback(Action callback)
+        /// <summary>
+        /// Atomically read current state with Thread-safe guarantee.
+        /// </summary>
+        private volatile int state;
+        public const int STATE_INIT = 0;
+        public const int STATE_WORKING = 1;
+        public const int STATE_EXPIRED = 2;
+        public const int STATE_CANCELED = 3;
+
+        #region Constructor
+        internal TimedCallback(Action callback)
         {
             Callback = callback;
             Next = null;
             state = STATE_INIT;
         }
 
+        #endregion
+
         public bool TryCancel()
         {
-            return STATE_INIT == StateCompareExchange(STATE_CANCELED, STATE_INIT);
+            return STATE_INIT == stateCompareExchange(STATE_CANCELED, STATE_INIT);
         }
 
-        /// <summary>
-        /// Atomically read current state with Thread-safe guarantee.
-        /// </summary>
-        public int State => StateCompareExchange(0, 0);
+        public bool IsCanceled()
+        {
+            return STATE_CANCELED == state;
+        }
 
         internal void Expire()
         {
-            if (STATE_INIT != StateCompareExchange(STATE_WORKING, STATE_INIT))
+            if (STATE_INIT != stateCompareExchange(STATE_WORKING, STATE_INIT))
                 return;
             
             try {
@@ -45,11 +52,9 @@ namespace ricefan123.Timer
             }
             finally
             {
-                StateCompareExchange(STATE_EXPIRED, STATE_WORKING);
+                stateCompareExchange(STATE_EXPIRED, STATE_WORKING);
             }
         }
-
-        private int state;
 
         internal TimedCallback Next;
 
@@ -57,7 +62,7 @@ namespace ricefan123.Timer
 
         internal Action Callback { get; set; }
 
-        private int StateCompareExchange(int value, int comparand)
+        private int stateCompareExchange(int value, int comparand)
         {
             return Interlocked.CompareExchange(ref state, value, comparand);
         }
