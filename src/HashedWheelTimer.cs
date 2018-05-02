@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Runtime.CompilerServices;
 using ricefan123.Timer.Util;
 
 namespace ricefan123.Timer
@@ -23,8 +24,8 @@ namespace ricefan123.Timer
 
         public HashedWheelTimer(TimeSpan timeout, TimeSpan interval, SleepPolicy policy)
         {
-            TicksInterval = interval;
-            DefaultTimeout = timeout;
+            TicksInterval = NanoTime.FromMilliseconds(interval.Milliseconds);
+            DefaultTimeout = NanoTime.FromMilliseconds(timeout.Milliseconds);
             workerThread = null;
             workerWorkingFlag = new CountdownEvent(1);
             SetSleep(policy);
@@ -37,8 +38,12 @@ namespace ricefan123.Timer
 
         public TimedCallback ScheduleTimeout(Action action, TimeSpan timeout)
         {
-            var callback = new TimedCallback(action);
-            ScheduleTimeoutImpl(callback, timeout);
+            var signedms = timeout.Milliseconds;
+            if (signedms < 0)
+                throw new ArgumentException("Expiry time cannot be negative.", "timeout");
+            ulong ms = (ulong) signedms;
+            var callback = new TimedCallback(action, NanoTime.FromMilliseconds(ms));
+            ScheduleTimeoutImpl(callback, ms);
 
             return callback;
         }
@@ -48,11 +53,49 @@ namespace ricefan123.Timer
 
         #region Private Methods
 
-        private void ScheduleTimeoutImpl(TimedCallback callback, TimeSpan timeout)
+        private void ScheduleTimeoutImpl(TimedCallback callback, ulong milliseconds)
         {
             Interlocked.Increment(ref timeoutsCount);
+
+            var nextTick = CalculateNextTick();
+            var diff = ToWheelTicks(milliseconds);
+            var due = diff + nextTick;
+
+            var index = nextTick & WHEEL_MASK;
+
+
+
             StartWorking();
         }
+
+        private bool CascadeTimers(int hierarchyIdx, ulong idx)
+        {
+            // TODO
+            // what if newly added timer has been assigned to cascading slot?
+
+            var slot = new HashedWheelSlot(slots[hierarchyIdx, idx].Clear()); 
+
+            for (TimedCallback callback = slot.TryPop(); 
+                 callback != null;
+                 callback = slot.TryPop())
+            {
+                ScheduleTimeoutImpl(callback, callback.RemainingTime(currentTick));
+            }
+            
+
+        }
+
+        private ulong CalculateNextTick()
+        {
+            return prevTicks + TicksInterval;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private ulong ToWheelTicks(ulong milliTimeout)
+        {
+             return milliTimeout / TicksInterval;
+        }
+
 
         private void StartWorking()
         {
@@ -70,13 +113,13 @@ namespace ricefan123.Timer
                 throw new InvalidOperationException("Unknown worker state.");
             }
 
-            workerWorkingFlag.Wait();
+            workerWorkingFlag.Signal();
         }
 
         private void DefaultInitialize()
         {
-            DefaultTimeout = TimeSpan.FromSeconds(10);
-            TicksInterval = TimeSpan.FromMilliseconds(10);
+            DefaultTimeout = NanoTime.FromSeconds(10);
+            TicksInterval = NanoTime.FromMilliseconds(10);
             workerThread = null;
             workerWorkingFlag = new CountdownEvent(1);
             InitializeSlots();
@@ -89,6 +132,7 @@ namespace ricefan123.Timer
             for (int i = 0; i != WHEEL_BUCKETS; ++i)
                 for (int j = 0; j != WHEEL_SIZE; ++j)
                     slots[i, j] = new HashedWheelSlot();
+            currentTick = 0;
         }
 
         private void SetSleep(SleepPolicy policy)
@@ -107,7 +151,32 @@ namespace ricefan123.Timer
 
         private void WorkLoop()
         {
-            workerWorkingFlag.Signal();
+            workerWorkingFlag.Wait();
+            time.Start();
+
+            while (workerState != WORKER_KILLED) 
+            {
+                var timeouts = slots[0, currentTick];
+
+                var wheel0Index = (currentTick & WHEEL_MASK);
+                if (wheel0Index == 0)
+                {
+                    if (CascadeTimers(1, (currentTick >> WHEEL_BITS) & WHEEL_MASK) &&
+                        CascadeTimers(2, (currentTick >> (2 * WHEEL_BITS)) & WHEEL_MASK))
+                        CascadeTimers(3, (currentTick >> (3 * WHEEL_BITS)) & WHEEL_MASK);
+                }
+
+
+
+                for (var timeout = timeouts.TryPop(); timeout != null; timeout = timeouts.TryPop())
+                {
+                    timeout.Expire();
+                }
+
+                ++currentTick;
+
+                
+            }
         }
 
         #endregion
@@ -130,14 +199,24 @@ namespace ricefan123.Timer
         private const int WORKER_INIT = 0;
         private const int WORKER_STARTED = 1;
         private const int WORKER_KILLED = 2;
-
+        
         private HashedWheelSlot[,] slots;
         private LinkedList<Action> timeouts = new LinkedList<Action>();
 
         private SleepMethods.SleepFunc Sleep { get; set; }
 
-        private TimeSpan DefaultTimeout { get; set; }
+        private ulong currentTick;
 
-        private TimeSpan TicksInterval { get; set; }
+        private ulong DefaultTimeout { get; set; }
+
+        /// <summary>
+        /// In nanosecond scale.
+        /// </summary>
+        private ulong TicksInterval { get; set; }
+
+        private ulong prevTicks;
+
+        private NanoTime.Timer time = new NanoTime.Timer();
+
     }
 }

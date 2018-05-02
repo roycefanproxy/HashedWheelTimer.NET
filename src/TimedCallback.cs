@@ -18,12 +18,15 @@ namespace ricefan123.Timer
         public const int STATE_EXPIRED = 2;
         public const int STATE_CANCELED = 3;
 
+        private ulong expiryTime;
+
         #region Constructor
-        internal TimedCallback(Action callback)
+        internal TimedCallback(Action callback, ulong expiryTime)
         {
             Callback = callback;
             Next = null;
             state = STATE_INIT;
+            this.expiryTime = expiryTime;
         }
 
         #endregion
@@ -33,9 +36,11 @@ namespace ricefan123.Timer
             return STATE_INIT == stateCompareExchange(STATE_CANCELED, STATE_INIT);
         }
 
-        public bool IsCanceled()
+        public bool IsCanceled => state == STATE_CANCELED;
+
+        public ulong RemainingTime(ulong currentTime)
         {
-            return STATE_CANCELED == state;
+            return expiryTime > currentTime ? expiryTime - currentTime : 0;
         }
 
         internal void Expire()
@@ -56,11 +61,10 @@ namespace ricefan123.Timer
             }
         }
 
-        internal TimedCallback Next;
-
-        internal TimedCallback Prev;
+        internal volatile TimedCallback Next;
 
         internal Action Callback { get; set; }
+        public long ExpiryTime { get => expiryTime; set => expiryTime = value; }
 
         private int stateCompareExchange(int value, int comparand)
         {
