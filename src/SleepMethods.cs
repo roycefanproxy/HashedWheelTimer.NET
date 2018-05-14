@@ -16,6 +16,9 @@ namespace ricefan123.Timer.Util
 
         private static void PreciseSleepImpl(int milliseconds)
         {
+            if (milliseconds < 0)
+                return;
+
             var watch = new Stopwatch();
             double freq_per_ms = Stopwatch.Frequency;
 
@@ -33,6 +36,9 @@ namespace ricefan123.Timer.Util
 
         private static void NativeSleepImpl(int milliseconds)
         {
+            if (milliseconds < 0)
+                return;
+
             Thread.Sleep(milliseconds);
         }
 
