@@ -6,7 +6,7 @@ namespace ricefan123.Timer
     internal class HashedWheelSlot
     {
         // volatile is so confusing in .NET
-        private volatile TimedCallback first = null;
+        private TimedCallback first = null;
 
         internal HashedWheelSlot() {}
 
@@ -19,7 +19,7 @@ namespace ricefan123.Timer
         internal void Push(TimedCallback callback)
         {
             do {
-                callback.Next = first;
+                callback.Next = Interlocked.CompareExchange(ref first, null, null);
             }
             while (Interlocked.CompareExchange(ref first, callback, callback.Next) != callback.Next);
         }
@@ -30,10 +30,11 @@ namespace ricefan123.Timer
             TimedCallback retVal;
 
             do {
-                retVal = first;
+                retVal = Interlocked.CompareExchange(ref first, null, null);
             }
             while (retVal != null && Interlocked.CompareExchange(ref first, retVal.Next, retVal) != retVal);
-            retVal.Next = null;
+            if (retVal != null)
+                retVal.Next = null;
 
             return retVal;
         }
@@ -44,6 +45,7 @@ namespace ricefan123.Timer
             do
             {
                 currentFirst = first;
+                currentFirst = Interlocked.CompareExchange(ref first, null, null);
             }
             while (Interlocked.CompareExchange(ref first, null, currentFirst) != currentFirst);
 

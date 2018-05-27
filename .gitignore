@@ -1,0 +1,12 @@
+bin/
+obj/
+
+# vim
+.*~
+*.*~
+
+# vscode
+.vscode/
+
+# nuget
+*.nuspec

@@ -1,18 +1,17 @@
 using System;
 using System.Threading;
+using System.Diagnostics;
 using ricefan123.Timer.Util;
-using NLog;
 
 namespace ricefan123.Timer
 {
     public class TimedCallback
     {
-        static Logger logger = LogManager.GetCurrentClassLogger();
 
         /// <summary>
         /// Atomically read current state with Thread-safe guarantee.
         /// </summary>
-        private volatile int state;
+        private int state;
         public const int STATE_INIT = 0;
         public const int STATE_WORKING = 1;
         public const int STATE_EXPIRED = 2;
@@ -36,7 +35,9 @@ namespace ricefan123.Timer
             return STATE_INIT == stateCompareExchange(STATE_CANCELED, STATE_INIT);
         }
 
-        public bool IsCanceled => state == STATE_CANCELED;
+        public bool IsCanceled => Interlocked.CompareExchange(ref state, 0, 0) == STATE_CANCELED;
+
+        public bool IsExpired => Interlocked.CompareExchange(ref state, 0, 0) == STATE_EXPIRED;
 
         public long RemainingTime(long currentTime)
         {
@@ -53,7 +54,7 @@ namespace ricefan123.Timer
             }
             catch (Exception ex)
             {
-                logger.Error(ex, $"HashedWheelTimer timout callback threw an exception.");
+                Debug.WriteLine($"HashedWheelTimer timout callback threw an exception: {ex.Message}. ");
             }
             finally
             {

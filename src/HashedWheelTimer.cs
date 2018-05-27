@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Runtime.CompilerServices;
 using ricefan123.Timer.Util;
+using System.Diagnostics;
 
 namespace ricefan123.Timer
 {
@@ -24,13 +25,14 @@ namespace ricefan123.Timer
 
         public HashedWheelTimer(TimeSpan timeout, TimeSpan interval, SleepPolicy policy)
         {
-            TicksInterval = NanoTime.FromMilliseconds(interval.Milliseconds);
-            DefaultTimeout = NanoTime.FromMilliseconds(timeout.Milliseconds);
+            TicksInterval = NanoTime.FromMilliseconds(interval.TotalMilliseconds);
+            DefaultTimeout = NanoTime.FromMilliseconds(timeout.TotalMilliseconds);
             ticked = 0;
-            workerThread = null;
-            workerWorkingFlag = new CountdownEvent(1);
             SetSleep(policy);
             InitializeSlots();
+            workerThread = new Thread(WorkLoop);
+            time.Start();
+            workerThread.Start();
         }
 
         #endregion
@@ -39,15 +41,31 @@ namespace ricefan123.Timer
 
         public TimedCallback ScheduleTimeout(Action action, TimeSpan timeout)
         {
-            var ms = timeout.Milliseconds;
+            if (Interlocked.CompareExchange(ref workerState, -1, -1) == WORKER_KILLED)
+                throw new InvalidOperationException("Adding new timeout to stopped timer.");
+            var ms = timeout.TotalMilliseconds;
             if (ms < 0)
                 throw new ArgumentException("Expiry time cannot be negative.", "timeout");
+            CheckTimerState();
+
             var nanoTimeout = NanoTime.FromMilliseconds(ms);
-            var callback = new TimedCallback(action, time.Elapsed + nanoTimeout);
+            var actualTimeout = time.Elapsed + nanoTimeout;
+            var callback = new TimedCallback(action, actualTimeout);
             Interlocked.Increment(ref timeoutsCount);
-            ScheduleTimeoutImpl(callback, nanoTimeout);
+            ScheduleTimeoutImpl(callback, actualTimeout);
 
             return callback;
+        }
+
+        public ICollection<TimedCallback> Stop() {
+            if (Interlocked.CompareExchange(ref workerState, 0, 0) == WORKER_INIT)
+            {
+                while (Interlocked.CompareExchange(ref workerState, WORKER_KILLED, WORKER_INIT) != WORKER_INIT)
+                    continue;
+            }
+
+            stopBarier.Wait();
+            return unprocessedTimeouts;
         }
 
 
@@ -57,44 +75,45 @@ namespace ricefan123.Timer
 
         private void ScheduleTimeoutImpl(TimedCallback callback, long nanoseconds)
         {
-            var diff = ToWheelTicks(nanoseconds);
-            var deadline = CalculateDeadline();
+            // TODO: Should always schedule to next tick
+            var differredTimeout = nanoseconds + TicksInterval;
+            var diff = ToWheelTicks(differredTimeout);
+            var deadline = NanoTime.ToMilliseconds(CalculateDeadline());
             var due = diff + deadline;
-            var dueMs = NanoTime.ToMilliseconds(due);
             HashedWheelSlot slot;
 
             if (diff < WHEEL_SIZE)
             {
-                slot = slots[0, dueMs & WHEEL_MASK];
+                var _ =(due & WHEEL_MASK);
+                slot = slots[0, due & WHEEL_MASK];
             }
             else if (diff < 1 << (2 * WHEEL_BITS))
             {
-                slot = slots[1, (dueMs >> WHEEL_BITS) & WHEEL_MASK];
+                var _ =((due >> WHEEL_BITS) & WHEEL_MASK);
+                slot = slots[1, (due >> WHEEL_BITS) & WHEEL_MASK];
             }
             else if (diff < 1 << (3 * WHEEL_BITS))
             {
-                slot = slots[2, (dueMs >> 2 * WHEEL_BITS) & WHEEL_MASK];
+                var _ =((due >> 2 * WHEEL_BITS) & WHEEL_MASK);
+                slot = slots[2, (due >> 2 * WHEEL_BITS) & WHEEL_MASK];
             }
             else
             {
                 if (diff > 0xffffffff)
                 {
                     diff = 0xffffffff;
-                    dueMs = NanoTime.ToMilliseconds(diff + deadline);
+                    due = NanoTime.ToMilliseconds(diff + deadline);
                 }
-                slot = slots[3, (dueMs >> 3 * WHEEL_BITS) & WHEEL_MASK];
+                var _ =((due >> 3 * WHEEL_BITS) & WHEEL_MASK);
+                slot = slots[3, (due >> 3 * WHEEL_BITS) & WHEEL_MASK];
             }
             slot.Push(callback);
 
 
-            /// TODO
-            // tobe deleted.
-            StartWorking();
         }
 
         private void ExpireTimeouts()
         {
-            var timeouts = slots[0, ticked];
 
             var wheel0Index = (ticked & WHEEL_MASK);
             if (wheel0Index == 0)
@@ -104,6 +123,7 @@ namespace ricefan123.Timer
                     CascadeTimers(3, (ticked >> (3 * WHEEL_BITS)) & WHEEL_MASK);
             }
 
+            var timeouts = slots[0, wheel0Index];
 
             for (var timeout = timeouts.TryPop(); timeout != null; timeout = timeouts.TryPop())
             {
@@ -138,34 +158,15 @@ namespace ricefan123.Timer
              return nanoTimeout / TicksInterval;
         }
 
-
-        private void StartWorking()
-        {
-            switch (workerState)
-            {
-            case WORKER_INIT:
-                if (Interlocked.CompareExchange(ref workerState, WORKER_STARTED, WORKER_INIT) == WORKER_INIT)
-                    workerThread.Start();
-                break;
-            case WORKER_STARTED:
-                break;
-            case WORKER_KILLED:
-                throw new InvalidOperationException("Cannot start a killed thread.");
-            default:
-                throw new InvalidOperationException("Unknown worker state.");
-            }
-
-            workerWorkingFlag.Signal();
-        }
-
         private void DefaultInitialize()
         {
             DefaultTimeout = NanoTime.FromSeconds(10);
-            TicksInterval = NanoTime.FromMilliseconds(10);
-            workerThread = null;
-            workerWorkingFlag = new CountdownEvent(1);
-            ticked = 0;
+            TicksInterval = NanoTime.FromMilliseconds(50);
             InitializeSlots();
+            workerThread = new Thread(WorkLoop);
+            time.Start();
+            workerThread.Start();
+            ticked = 0;
         }
 
         private void InitializeSlots()
@@ -199,25 +200,57 @@ namespace ricefan123.Timer
 
         private void WorkLoop()
         {
-            workerWorkingFlag.Wait();
-            time.Start();
+            var test = Interlocked.CompareExchange(ref workerState, -1, -1);
+            //if (Interlocked.CompareExchange(ref workerState, -1, -1) != WORKER_INIT)
+            if (test == WORKER_KILLED)
+            {
+                throw new InvalidOperationException($"This should not happen! {test}");
+            }
 
-            while (workerState != WORKER_KILLED) 
+            while (Interlocked.CompareExchange(ref workerState, 0, 0) != WORKER_KILLED) 
             {
                 ExpireTimeouts();
-                var sleepTime =  - time.Elapsed;
+                long newDeadline = CalcNewDeadline();
+                var sleepTime = newDeadline - time.Elapsed;
                 // tick before sleep so that timeout added while sleeping
                 // will be delayed by a tick to avoid early wake up.
-                Interlocked.Increment(ref ticked);
                 Sleep(NanoTime.ToMilliseconds(sleepTime));
+                Interlocked.Increment(ref ticked);
             }
+            
+            unprocessedTimeouts = new HashSet<TimedCallback>();
+            foreach (var slot in slots) 
+            {
+                TimedCallback timeout = null;
+                while ((timeout = slot.TryPop()) != null)
+                {
+                    unprocessedTimeouts.Add(timeout);
+                }
+            }
+            stopBarier.Signal();
+
+        }
+
+        private void CheckTimerState()
+        {
+            switch (Interlocked.CompareExchange(ref workerState, 0, 0))
+            {
+            case WORKER_INIT:
+                break;
+            case WORKER_KILLED:
+                throw new InvalidOperationException("Adding Timeout to stopped timer.");
+            }
+        }
+
+        private long CalcNewDeadline()
+        {
+            return (Interlocked.Read(ref ticked) + 1) * TicksInterval;
         }
 
         #endregion
 
         public int TimeoutsCount => Interlocked.CompareExchange(ref timeoutsCount, 0, 0);
 
-        CountdownEvent workerWorkingFlag;
         public int timeoutsCount = 0;
 
         private static readonly uint WHEEL_BUCKETS = 4;
@@ -228,11 +261,10 @@ namespace ricefan123.Timer
 
         private Thread workerThread;
 
-        private volatile int workerState;
+        private int workerState = WORKER_INIT;
         
         private const int WORKER_INIT = 0;
-        private const int WORKER_STARTED = 1;
-        private const int WORKER_KILLED = 2;
+        private const int WORKER_KILLED = 1;
         
         private HashedWheelSlot[,] slots;
         private LinkedList<Action> timeouts = new LinkedList<Action>();
@@ -248,9 +280,10 @@ namespace ricefan123.Timer
         /// </summary>
         private long TicksInterval { get; set; }
 
-        private readonly ulong startTime;
+        private ISet<TimedCallback> unprocessedTimeouts;
 
-        private HighResolutionTimer time = new HighResolutionTimer();
+        private CountdownEvent stopBarier = new CountdownEvent(1);
+        private ConcurrentStopwatch time = new ConcurrentStopwatch();
 
     }
 }

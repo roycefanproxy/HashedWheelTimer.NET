@@ -6,13 +6,13 @@ using System.Diagnostics;
 namespace ricefan123.Timer.Util
 {
     public enum SleepPolicy { Default, Native, Precise };
-    public static class SleepMethods
+    internal static class SleepMethods
     {
-        public delegate void SleepFunc(int milliseconds);
+        internal delegate void SleepFunc(int milliseconds);
         
-        public static SleepFunc NativeSleep => new SleepFunc(NativeSleepImpl);
+        internal static SleepFunc NativeSleep => new SleepFunc(NativeSleepImpl);
 
-        public static SleepFunc PreciseSleep => new SleepFunc(PreciseSleepImpl);
+        internal static SleepFunc PreciseSleep => new SleepFunc(PreciseSleepImpl);
 
         private static void PreciseSleepImpl(int milliseconds)
         {
@@ -36,8 +36,9 @@ namespace ricefan123.Timer.Util
 
         private static void NativeSleepImpl(int milliseconds)
         {
-            if (milliseconds < 0)
+            if (milliseconds < 0) {
                 return;
+            }
 
             Thread.Sleep(milliseconds);
         }
