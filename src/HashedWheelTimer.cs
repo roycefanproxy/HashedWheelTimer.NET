@@ -11,22 +11,22 @@ namespace ricefan123.Timer
     {
         #region Constructors
 
-        public HashedWheelTimer()
-        {
-            SetSleep(SleepPolicy.Default);
-            DefaultInitialize();
-        }
-
-        public HashedWheelTimer(SleepPolicy policy)
+        public HashedWheelTimer(SleepPolicy policy = SleepPolicy.Default)
         {
             SetSleep(policy);
             DefaultInitialize();
         }
 
-        public HashedWheelTimer(TimeSpan timeout, TimeSpan interval, SleepPolicy policy)
+        public HashedWheelTimer(TimeSpan interval, SleepPolicy policy = SleepPolicy.Default)
+            : this(policy)
         {
             TicksInterval = NanoTime.FromMilliseconds(interval.TotalMilliseconds);
-            DefaultTimeout = NanoTime.FromMilliseconds(timeout.TotalMilliseconds);
+        }
+
+        public HashedWheelTimer(TimeSpan interval, TimeSpan defaultTimeout, SleepPolicy policy = SleepPolicy.Default)
+        {
+            TicksInterval = NanoTime.FromMilliseconds(interval.TotalMilliseconds);
+            DefaultTimeout = NanoTime.FromMilliseconds(defaultTimeout.TotalMilliseconds);
             ticked = 0;
             SetSleep(policy);
             InitializeSlots();

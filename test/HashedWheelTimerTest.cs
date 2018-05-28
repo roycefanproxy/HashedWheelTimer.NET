@@ -4,6 +4,8 @@ using ricefan123.Timer;
 using System.Threading;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using ricefan123.Timer.Util;
+using System.Collections.Concurrent;
 
 namespace test
 {
@@ -105,6 +107,37 @@ namespace test
             });
             Task.Delay(TimeSpan.FromSeconds(3)).Wait();
             Assert.True(flag, "Expected exception didn't occur");
+        }
+
+        [Fact]
+        public void TestExecutionOnTime() 
+        {
+            var tickDuration = TimeSpan.FromMilliseconds(200);
+            var timeout = TimeSpan.FromMilliseconds(125);
+            var nanoTimeout = NanoTime.FromMilliseconds(125);
+            var maxTimeout = 2 * (tickDuration + timeout);
+            var nanoMaxTimeout = NanoTime.FromMilliseconds(maxTimeout.TotalMilliseconds);
+            HashedWheelTimer timer = new HashedWheelTimer(tickDuration);
+            var queue = new BlockingCollection<long>();
+
+            var watch = new ConcurrentStopwatch();
+            watch.Start();
+            int scheduledTasks = 100000;
+            for (int i = 0; i < scheduledTasks; i++) 
+            {
+                var start = watch.Elapsed;
+                timer.ScheduleTimeout(() => 
+                {
+                    queue.Add(watch.Elapsed - start);
+                }, timeout);
+            }
+
+            for (int i = 0; i < scheduledTasks; i++) {
+                long delay = queue.Take();
+                Assert.True(delay >= nanoTimeout && delay < nanoMaxTimeout, i + ": Timeout + " + scheduledTasks + " delay " + delay + " must be " + timeout + " < " + maxTimeout);
+            }
+
+            timer.Stop();
         }
     }
 }
