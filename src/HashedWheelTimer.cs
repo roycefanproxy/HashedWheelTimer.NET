@@ -41,14 +41,16 @@ namespace ricefan123.Timer
 
         public TimedCallback ScheduleTimeout(Action action, TimeSpan timeout)
         {
-            if (Interlocked.CompareExchange(ref workerState, -1, -1) == WORKER_KILLED)
-                throw new InvalidOperationException("Adding new timeout to stopped timer.");
-            var ms = timeout.TotalMilliseconds;
-            if (ms < 0)
+           return ScheduleTimeout(action, timeout.TotalMilliseconds);
+        }
+
+        public TimedCallback ScheduleTimeout(Action action, double milliseconds)
+        {
+            if (milliseconds < 0)
                 throw new ArgumentException("Expiry time cannot be negative.", "timeout");
             CheckTimerState();
 
-            var nanoTimeout = NanoTime.FromMilliseconds(ms);
+            var nanoTimeout = NanoTime.FromMilliseconds(milliseconds);
             var actualTimeout = time.Elapsed + nanoTimeout;
             var callback = new TimedCallback(action, actualTimeout, this);
             Interlocked.Increment(ref timeoutsCount);

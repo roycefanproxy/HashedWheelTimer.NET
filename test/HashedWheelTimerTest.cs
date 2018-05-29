@@ -12,10 +12,10 @@ namespace test
     public class HashedWheelTimerTest
     {
         [Theory]
-        [InlineData(10, 9.7)]
-        [InlineData(2, 1.3)]
-        [InlineData(1, 0.5)]
-        [InlineData(4, 3)]
+        [InlineData(100, 97)]
+        [InlineData(20, 13)]
+        [InlineData(10, 5)]
+        [InlineData(40, 30)]
         public void TestScheduleTimeoutShouldNotRunBeforeDelay(double expiryTime, double waitTime) 
         {
             var timer = new HashedWheelTimer();
@@ -25,8 +25,8 @@ namespace test
                 flag = true;
                 barrier.Signal();
             };
-            TimedCallback timeout = timer.ScheduleTimeout(cb, TimeSpan.FromSeconds(expiryTime));
-            Assert.False(barrier.Wait(TimeSpan.FromSeconds(waitTime)));
+            TimedCallback timeout = timer.ScheduleTimeout(cb, TimeSpan.FromMilliseconds(expiryTime));
+            Assert.False(barrier.Wait(TimeSpan.FromMilliseconds(waitTime)));
             Assert.False(timeout.IsExpired, "TimedTask should not be expired");
             Assert.False(flag);
             timer.Stop();
@@ -151,7 +151,7 @@ namespace test
 
             var timedCallback = timer.ScheduleTimeout(() => {
                 barrier.Signal();
-            }, TimeSpan.FromMilliseconds(timeout));
+            }, timeout);
             Task.Delay(TimeSpan.FromMilliseconds(cancelDelayTime)).Wait();
             Assert.True(timedCallback.TryCancel());
             Assert.False(barrier.Wait(timeout));
@@ -193,6 +193,29 @@ namespace test
             Assert.False(barrier.Wait(TimeSpan.FromSeconds(1)));
             Assert.True(timeout.TryCancel());
             timer.Stop();
+        }
+
+        [Theory]
+        [InlineData(20, 200)]
+        [InlineData(20, 100)]
+        [InlineData(50, 300)]
+        [InlineData(20, 10)]
+        public void TestDelayTimeoutShouldNotLargerThanSingleTickDuration(int tickInterval, int timeout)
+        {
+            var watch = new ConcurrentStopwatch();
+            var barrier = new CountdownEvent(1);
+            var timer = new HashedWheelTimer(interval:TimeSpan.FromMilliseconds(tickInterval));
+            long elapsed = 0;
+
+            watch.Start();
+            timer.ScheduleTimeout(() => 
+            {
+                Interlocked.Exchange(ref elapsed, watch.Elapsed);
+                barrier.Signal();
+            }, TimeSpan.FromMilliseconds(timeout));
+
+            Assert.True(barrier.Wait(tickInterval * 2 + timeout), $"Elapsed: {NanoTime.ToMilliseconds(elapsed)}, ticks interval: {tickInterval}, timeout: {timeout}.");
+
         }
 
         public Action EmptyCallback()
