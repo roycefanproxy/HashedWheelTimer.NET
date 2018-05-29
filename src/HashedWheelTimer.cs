@@ -50,8 +50,9 @@ namespace ricefan123.Timer
 
             var nanoTimeout = NanoTime.FromMilliseconds(ms);
             var actualTimeout = time.Elapsed + nanoTimeout;
-            var callback = new TimedCallback(action, actualTimeout);
+            var callback = new TimedCallback(action, actualTimeout, this);
             Interlocked.Increment(ref timeoutsCount);
+            Interlocked.Increment(ref activeTimeoutsCount);
             ScheduleTimeoutImpl(callback, actualTimeout);
 
             return callback;
@@ -69,6 +70,16 @@ namespace ricefan123.Timer
         }
 
 
+        #endregion
+
+        #region internal Methods
+
+        internal void DecrementActiveTimeoutsCount()
+        {
+            if (Interlocked.CompareExchange(ref activeTimeoutsCount, -1, -1) < 0)
+                throw new InvalidOperationException("Decrementing Active Timeout of 0 active timeout timer");
+            Interlocked.Decrement(ref activeTimeoutsCount);
+        }
         #endregion
 
         #region Private Methods
@@ -127,6 +138,7 @@ namespace ricefan123.Timer
 
             for (var timeout = timeouts.TryPop(); timeout != null; timeout = timeouts.TryPop())
             {
+                Interlocked.Decrement(ref activeTimeoutsCount);
                 Interlocked.Decrement(ref timeoutsCount);
                 timeout.Expire();
             }
@@ -249,9 +261,13 @@ namespace ricefan123.Timer
 
         #endregion
 
-        public int TimeoutsCount => Interlocked.CompareExchange(ref timeoutsCount, 0, 0);
+        public int TimeoutsCount => Interlocked.CompareExchange(ref timeoutsCount, -1, -1);
 
-        public int timeoutsCount = 0;
+        public int ActiveTimeoutsCount => Interlocked.CompareExchange(ref activeTimeoutsCount, -1, -1);
+
+        private int timeoutsCount = 0;
+
+        private int activeTimeoutsCount = 0;
 
         private static readonly uint WHEEL_BUCKETS = 4;
         private static readonly int WHEEL_BITS = 8;

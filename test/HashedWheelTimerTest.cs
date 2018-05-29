@@ -139,5 +139,65 @@ namespace test
 
             timer.Stop();
         }
+
+        [Theory]
+        [InlineData(1000, 2000, 1000)]
+        [InlineData(500, 2000, 1000)]
+        [InlineData(100, 1000, 300)]
+        public void TestCancelledTaskShouldNotBeExecuted(int interval, int timeout, int cancelDelayTime)
+        {
+            var timer = new HashedWheelTimer(TimeSpan.FromMilliseconds(interval));
+            var barrier = new CountdownEvent(1);
+
+            var timedCallback = timer.ScheduleTimeout(() => {
+                barrier.Signal();
+            }, TimeSpan.FromMilliseconds(timeout));
+            Task.Delay(TimeSpan.FromMilliseconds(cancelDelayTime)).Wait();
+            Assert.True(timedCallback.TryCancel());
+            Assert.False(barrier.Wait(timeout));
+            
+        }
+
+        [Fact]
+        public void TestActivePendingTimeoutsShouldBeZero()  
+        {
+            CountdownEvent barrier = new CountdownEvent(1);
+            var timer = new HashedWheelTimer();
+            var t1 = timer.ScheduleTimeout(EmptyCallback(), TimeSpan.FromMinutes(100));
+            var t2 = timer.ScheduleTimeout(EmptyCallback(), TimeSpan.FromMinutes(100));
+            timer.ScheduleTimeout(() => 
+            {
+                barrier.Signal();
+            }, TimeSpan.FromMilliseconds(90));
+
+            Assert.Equal(3, timer.ActiveTimeoutsCount);
+            Assert.True(t1.TryCancel());
+            Assert.True(t2.TryCancel());
+            barrier.Wait();
+
+            Assert.Equal(0, timer.ActiveTimeoutsCount);
+            timer.Stop();
+        }
+
+        [Fact]
+        public void TestOverflow()
+        {
+            CountdownEvent barrier = new CountdownEvent(1);
+            const int intervalMs = 50;
+            var timer = new HashedWheelTimer(interval:TimeSpan.FromMilliseconds(intervalMs));
+            TimeSpan superDureTimeSpan = TimeSpan.FromMilliseconds(intervalMs) * 0xffffffff;
+            var timeout = timer.ScheduleTimeout(() =>
+            {
+                barrier.Signal();
+            }, superDureTimeSpan);
+            Assert.False(barrier.Wait(TimeSpan.FromSeconds(1)));
+            Assert.True(timeout.TryCancel());
+            timer.Stop();
+        }
+
+        public Action EmptyCallback()
+        {
+            return () => {};
+        }
     }
 }

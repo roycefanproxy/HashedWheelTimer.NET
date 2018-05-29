@@ -20,19 +20,23 @@ namespace ricefan123.Timer
         private long expiryTime;
 
         #region Constructor
-        internal TimedCallback(Action callback, long expiryTime)
+        internal TimedCallback(Action callback, long expiryTime, HashedWheelTimer timer)
         {
             Callback = callback;
             Next = null;
             state = STATE_INIT;
             this.expiryTime = expiryTime;
+            this.timer = timer;
         }
 
         #endregion
 
         public bool TryCancel()
         {
-            return STATE_INIT == stateCompareExchange(STATE_CANCELED, STATE_INIT);
+            bool retVal = false;
+            if (retVal = stateCompareExchange(STATE_CANCELED, STATE_INIT) == STATE_INIT)
+                timer.DecrementActiveTimeoutsCount();
+            return retVal;
         }
 
         public bool IsCanceled => Interlocked.CompareExchange(ref state, 0, 0) == STATE_CANCELED;
@@ -63,6 +67,8 @@ namespace ricefan123.Timer
         }
 
         internal volatile TimedCallback Next;
+
+        private HashedWheelTimer timer;
 
         internal Action Callback { get; set; }
         public long ExpiryTime { get => expiryTime; set => expiryTime = value; }
