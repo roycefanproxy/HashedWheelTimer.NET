@@ -11,18 +11,34 @@ namespace ricefan123.Timer
     {
         #region Constructors
 
+        /// <summary>
+        /// Create a timer with default tick interval (50ms).
+        /// </summary>
+        /// <param name="policy">Sleep precision.
+        /// By default Native will be used, which invokes Thread.Sleep. </param>
         public HashedWheelTimer(SleepPolicy policy = SleepPolicy.Default)
         {
             SetSleep(policy);
             DefaultInitialize();
         }
 
+        /// <summary>
+        /// Create a timer with specified tick interval and sleep policy.
+        /// </summary>
+        /// <param name="interval">ticks interval</param>
+        /// <param name="policy">Sleep policy</param>
         public HashedWheelTimer(TimeSpan interval, SleepPolicy policy = SleepPolicy.Default)
             : this(policy)
         {
             TicksInterval = NanoTime.FromMilliseconds(interval.TotalMilliseconds);
         }
 
+        /// <summary>
+        /// Create a timer with custamizable ticks interval and default timeout of TimedCallback.
+        /// </summary>
+        /// <param name="interval"></param>
+        /// <param name="defaultTimeout"></param>
+        /// <param name="policy"></param>
         public HashedWheelTimer(TimeSpan interval, TimeSpan defaultTimeout, SleepPolicy policy = SleepPolicy.Default)
         {
             TicksInterval = NanoTime.FromMilliseconds(interval.TotalMilliseconds);
@@ -39,11 +55,31 @@ namespace ricefan123.Timer
 
         #region Public Methods
 
+        /// <summary>
+        /// Schedule a new callback with default timeout.
+        /// </summary>
+        /// <param name="action">Callback function to be fired when timeout.</param>
+        /// <returns>A callback wrapper which allow user to cancel timeout.</returns>
+        public TimedCallback ScheduleTimeout(Action action)
+        {
+            return ScheduleTimeout(action, DefaultTimeout);
+        }
+
+        /// <summary>
+        /// Schedule a new callback with specified timeout.
+        /// </summary>
+        /// <param name="action">Callback function to be fired when timeout.</param>
+        /// <returns>A callback wrapper which allow user to cancel timeout.</returns>
         public TimedCallback ScheduleTimeout(Action action, TimeSpan timeout)
         {
            return ScheduleTimeout(action, timeout.TotalMilliseconds);
         }
 
+        /// <summary>
+        /// Schedule a new callback with specified timeout in milliseconds.
+        /// </summary>
+        /// <param name="action">Callback function to be fired when timeout.</param>
+        /// <returns>A callback wrapper which allow user to cancel timeout.</returns>
         public TimedCallback ScheduleTimeout(Action action, double milliseconds)
         {
             if (milliseconds < 0)
@@ -60,6 +96,10 @@ namespace ricefan123.Timer
             return callback;
         }
 
+        /// <summary>
+        /// Suspend the timer.
+        /// </summary>
+        /// <returns>Returns timeouts yet to expire.</returns>
         public ICollection<TimedCallback> Stop() {
             if (Interlocked.CompareExchange(ref workerState, 0, 0) == WORKER_INIT)
             {
@@ -148,6 +188,12 @@ namespace ricefan123.Timer
 
         }
 
+        /// <summary>
+        /// Reassign callback to higher precision timer slot.
+        /// </summary>
+        /// <param name="hierarchyIdx"></param>
+        /// <param name="tick">lower 8 bits of current tick.</param>
+        /// <returns></returns>
         private bool CascadeTimers(int hierarchyIdx, long tick)
         {
             // TODO
