@@ -5,6 +5,8 @@
     <Authors>Royce Fan</Authors>
     <PackageLicenseUrl>https://github.com/fanrice123/HashedWheelTimer.NET/blob/master/LICENSE</PackageLicenseUrl>
     <PackageProjectUrl>https://github.com/fanrice123/HashedWheelTimer.Net</PackageProjectUrl>
+    <Description>HashedWheelTimer inspired by facebook folly/io/async/HHWheelTimer and netty io.netty.util.HashedWheelTimer</Description>
+    <Copyright>Copyright 2018</Copyright>
   </PropertyGroup>
   <PropertyGroup>
     <TargetFrameworks>netstandard2.0;netstandard1.5;netcoreapp2.0;netcoreapp1.1</TargetFrameworks>
